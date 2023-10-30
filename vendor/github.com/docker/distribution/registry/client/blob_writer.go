@@ -22,6 +22,7 @@ type httpBlobUpload struct {
 	location string // always the last value of the location header.
 	offset   int64
 	closed   bool
+	maxRange int64
 }
 
 func (hbu *httpBlobUpload) Reader() (io.ReadCloser, error) {
@@ -36,12 +37,17 @@ func (hbu *httpBlobUpload) handleErrorResponse(resp *http.Response) error {
 }
 
 func (hbu *httpBlobUpload) ReadFrom(r io.Reader) (n int64, err error) {
+	if hbu.maxRange != 0 {
+		r = io.LimitReader(r, hbu.maxRange)
+	}
+
 	req, err := http.NewRequest("PATCH", hbu.location, ioutil.NopCloser(r))
 	if err != nil {
 		return 0, err
 	}
 	defer req.Body.Close()
 
+	req.Header.Set("Content-Length", fmt.Sprintf("%d", hbu.maxRange))
 	req.Header.Set("Content-Type", "application/octet-stream")
 
 	resp, err := hbu.client.Do(req)
@@ -71,6 +77,10 @@ func (hbu *httpBlobUpload) ReadFrom(r io.Reader) (n int64, err error) {
 }
 
 func (hbu *httpBlobUpload) Write(p []byte) (n int, err error) {
+	if hbu.maxRange != 0 && hbu.maxRange < int64(len(p)) {
+		p = p[:hbu.maxRange]
+	}
+
 	req, err := http.NewRequest("PATCH", hbu.location, bytes.NewReader(p))
 	if err != nil {
 		return 0, err
